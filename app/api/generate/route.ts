@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'Missing GEMINI_API_KEY environment variable' },
+        { status: 500 }
+      );
+    }
+
     const { industry, service, numberOfQueries, language, customScenarios } = await request.json();
 
     const prompt = `Generate ${numberOfQueries} realistic local search queries for ${service} in the ${industry} industry.
@@ -30,11 +39,11 @@ Format the response as a JSON array with this structure:
 Make the queries diverse, covering different user intents (informational, transactional, navigational) and various ways people search locally.
 Return only valid JSON.`;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY
+        'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
         contents: [
@@ -54,13 +63,14 @@ Return only valid JSON.`;
     }
 
     const data = await response.json();
-
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
     if (!text) {
       throw new Error('No text in API response');
     }
 
     const jsonMatch = text.match(/\[[\s\S]*\]/);
+
     if (!jsonMatch) {
       throw new Error('Failed to parse AI response');
     }
