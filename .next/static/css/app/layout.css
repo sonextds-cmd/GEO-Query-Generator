@@ -519,9 +519,6 @@ video {
 .grid {
   display: grid;
 }
-.contents {
-  display: contents;
-}
 .h-24 {
   height: 6rem;
 }
