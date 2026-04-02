@@ -1,5 +1,62 @@
 import { NextResponse } from 'next/server';
 
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const MAX_RETRIES = 2;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callGeminiWithRetry(apiKey: string, prompt: string) {
+  let lastResponse: Response | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const response = await fetch(GEMINI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    lastResponse = response;
+
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+      const waitTimeMs = Number.isFinite(retryAfterSeconds)
+        ? retryAfterSeconds * 1000
+        : 1000 * Math.pow(2, attempt);
+
+      await sleep(waitTimeMs);
+      continue;
+    }
+
+    return response;
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+
+  throw new Error('Unable to reach Gemini API');
+}
+
 export async function POST(request: Request) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -39,27 +96,20 @@ Format the response as a JSON array with this structure:
 Make the queries diverse, covering different user intents (informational, transactional, navigational) and various ways people search locally.
 Return only valid JSON.`;
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-      }),
-    });
+    const response = await callGeminiWithRetry(apiKey, prompt);
+
+    if (response.status === 429) {
+      return NextResponse.json(
+        {
+          error: 'Gemini API quota exceeded or too many requests. Please wait a moment and try again.',
+        },
+        { status: 429 }
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();

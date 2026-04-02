@@ -18,6 +18,10 @@ export default function GeoQueryGenerator() {
   const [error, setError] = useState('');
 
   const handleGenerate = async () => {
+    if (loading) {
+      return;
+    }
+
     if (!industry || !service) {
       setError('Please fill in Industry and Service fields');
       return;
@@ -35,20 +39,22 @@ export default function GeoQueryGenerator() {
         body: JSON.stringify({
           industry,
           service,
-          numberOfQueries: parseInt(numberOfQueries),
+          numberOfQueries: parseInt(numberOfQueries, 10),
           language,
           customScenarios,
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to generate queries');
+        throw new Error(data?.error || 'Failed to generate queries');
       }
 
-      const data = await response.json();
-      setQueries(data.queries);
+      setQueries(data.queries || []);
     } catch (err) {
-      setError('Failed to generate queries. Please try again.');
+      const message = err instanceof Error ? err.message : 'Failed to generate queries. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -61,9 +67,9 @@ export default function GeoQueryGenerator() {
   const exportToCSV = () => {
     const csvContent = [
       ['Query', 'Scenario'],
-      ...queries.map(q => [q.query, q.scenario])
+      ...queries.map((q) => [q.query, q.scenario]),
     ]
-      .map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+      .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(','))
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -190,7 +196,7 @@ export default function GeoQueryGenerator() {
                 <h2 className="text-2xl font-bold">Query Table</h2>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => copyToClipboard(queries.map(q => q.query).join('\n'))}
+                    onClick={() => copyToClipboard(queries.map((q) => q.query).join('\n'))}
                     className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm font-medium transition-colors"
                   >
                     Copy All Queries
