@@ -7,6 +7,18 @@ interface Query {
   scenario: string;
 }
 
+async function parseApiResponse(response: Response) {
+  const contentType = response.headers.get('content-type') || '';
+  const rawText = await response.text();
+
+  if (contentType.includes('application/json')) {
+    return JSON.parse(rawText) as { queries?: Query[]; error?: string };
+  }
+
+  const cleanText = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  throw new Error(cleanText || 'Server returned a non-JSON response');
+}
+
 export default function GeoQueryGenerator() {
   const [industry, setIndustry] = useState('');
   const [service, setService] = useState('');
@@ -18,9 +30,7 @@ export default function GeoQueryGenerator() {
   const [error, setError] = useState('');
 
   const handleGenerate = async () => {
-    if (loading) {
-      return;
-    }
+    if (loading) return;
 
     if (!industry || !service) {
       setError('Please fill in Industry and Service fields');
@@ -45,7 +55,7 @@ export default function GeoQueryGenerator() {
         }),
       });
 
-      const data = await response.json();
+      const data = await parseApiResponse(response);
 
       if (!response.ok) {
         throw new Error(data?.error || 'Failed to generate queries');
@@ -55,13 +65,18 @@ export default function GeoQueryGenerator() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to generate queries. Please try again.';
       setError(message);
+      setQueries([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setError('Unable to copy to clipboard');
+    }
   };
 
   const exportToCSV = () => {
