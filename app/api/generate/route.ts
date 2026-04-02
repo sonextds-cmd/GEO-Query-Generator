@@ -16,7 +16,7 @@ type QueryItem = {
   scenario: string;
 };
 
-const MODEL_NAME = 'gemini-1.5-flash';
+const MODEL_NAME = 'gemini-2.5-flash';
 const MAX_RETRIES = 2;
 
 function sleep(ms: number) {
