@@ -11,9 +11,10 @@ type GenerateRequest = {
   customScenarios?: string;
 };
 
-type QueryItem = {
-  query: string;
-  scenario: string;
+export type ScenarioItem = {
+  angle: string;
+  description: string;
+  queries: string[];
 };
 
 const MODEL_NAME = 'gemini-2.5-flash';
@@ -30,24 +31,28 @@ function buildPrompt({
   language,
   customScenarios,
 }: Required<GenerateRequest>) {
-  return `You are an SEO and GEO query generation assistant.
-Generate exactly ${numberOfQueries} search queries.
+  return `You are a GEO (Generative Engine Optimization) expert.
 
-Requirements:
-- Industry: ${industry}
-- Service: ${service}
-- Language: ${language}
-- Custom scenarios: ${customScenarios || 'None'}
-- Each query must be realistic, natural, and unique.
-- Focus on local, intent-driven, and scenario-based searches.
-- Return valid JSON only.
-- Do not wrap the JSON in markdown.
-- Use this schema exactly:
+Your task: for the industry "${industry}" and service "${service}", generate conversational search queries that real users ask AI assistants when looking for the best provider or brand.
+
+Step 1 — Identify key high-intent "trigger angles": distinct user concerns, needs, or decision factors that drive search intent. Only include scenarios that are genuinely relevant. There is no fixed number of scenarios.
+
+Step 2 — For EACH scenario, generate exactly ${numberOfQueries} unique conversational queries in ${language}.
+
+Hard rules:
+- EVERY scenario must have EXACTLY ${numberOfQueries} queries — no more, no less
+- ALL text (scenario names, descriptions, and every query) MUST be written entirely in ${language}
+- Queries must be natural, conversational, and realistic — as a real user would type to an AI
+- Each query within a scenario must be distinct and cover a different angle or phrasing
+- Custom context: ${customScenarios || 'None'}
+
+Return valid JSON only. No markdown wrapping. Use this exact schema:
 {
-  "queries": [
+  "scenarios": [
     {
-      "query": "string",
-      "scenario": "string"
+      "angle": "scenario name in ${language}",
+      "description": "one sentence in ${language}",
+      "queries": ["query 1", "query 2", ..., "query ${numberOfQueries}"]
     }
   ]
 }`;
@@ -61,29 +66,40 @@ function cleanJsonText(text: string) {
     .trim();
 }
 
-function normalizeResult(payload: unknown): QueryItem[] {
+function normalizeResult(payload: unknown): ScenarioItem[] {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid AI response format');
   }
 
-  const maybeQueries = (payload as { queries?: unknown }).queries;
-  if (!Array.isArray(maybeQueries)) {
-    throw new Error('AI response does not contain queries array');
+  const maybeScenarios = (payload as { scenarios?: unknown }).scenarios;
+  if (!Array.isArray(maybeScenarios)) {
+    throw new Error('AI response does not contain scenarios array');
   }
 
-  const queries = maybeQueries
-    .filter((item): item is { query?: unknown; scenario?: unknown } => !!item && typeof item === 'object')
+  const scenarios = maybeScenarios
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
     .map((item) => ({
-      query: typeof item.query === 'string' ? item.query.trim() : '',
-      scenario: typeof item.scenario === 'string' ? item.scenario.trim() : '',
+      angle: typeof item.angle === 'string' ? item.angle.trim() : '',
+      description: typeof item.description === 'string' ? item.description.trim() : '',
+      queries: Array.isArray(item.queries)
+        ? item.queries
+            .filter((q): q is string => typeof q === 'string')
+            .map((q) => q.trim())
+            .filter((q) => q.length > 0)
+        : [],
     }))
-    .filter((item) => item.query.length > 0);
+    .filter((item) => item.angle.length > 0 && item.queries.length > 0);
 
-  if (queries.length === 0) {
+  if (scenarios.length === 0) {
+    throw new Error('No valid scenarios returned from AI');
+  }
+
+  const totalQueries = scenarios.reduce((sum, s) => sum + s.queries.length, 0);
+  if (totalQueries === 0) {
     throw new Error('No valid queries returned from AI');
   }
 
-  return queries;
+  return scenarios;
 }
 
 async function generateWithRetry(prompt: string, apiKey: string) {
@@ -138,26 +154,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prompt = buildPrompt({
-      industry,
-      service,
-      numberOfQueries,
-      language,
-      customScenarios,
-    });
-
+    const prompt = buildPrompt({ industry, service, numberOfQueries, language, customScenarios });
     const text = await generateWithRetry(prompt, apiKey);
     const parsed = JSON.parse(cleanJsonText(text));
-    const queries = normalizeResult(parsed);
+    const scenarios = normalizeResult(parsed);
 
-    return NextResponse.json({ queries });
+    return NextResponse.json({ scenarios });
   } catch (error) {
     console.error('Error generating queries:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     if (/429|too many requests|quota/i.test(message)) {
       return NextResponse.json(
-        { error: 'Gemini API quota exceeded. Please try again again later.' },
+        { error: 'Gemini API quota exceeded. Please try again later.' },
         { status: 429 }
       );
     }
